@@ -4,7 +4,18 @@
 # editors
 *.swp
 *~
+.vscode/
 
-# nRF Connect SDK / Zephyr build output
+# build output
 build/
 build_*/
+
+# ble_coex per-test-case build directories (one build dir per baseline test
+# case instead of build/build_*, so they need naming explicitly)
+ble_coex/ble_only/
+ble_coex/both_coex_off/
+ble_coex/both_coex_on/
+ble_coex/wlan_only/
+
+# real wifi credentials, refer to template file
+ble_coex/prj.conf
