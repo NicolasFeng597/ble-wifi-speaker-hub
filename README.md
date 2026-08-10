@@ -5,7 +5,9 @@ link to the remote.
 Using a Nordic hardware stack and Zephyr firmware stack.
 
 ## Status
-Initial hardware config and packet sniffing done, looking into packet/protocol format and coexistence.
+Initial hardware config and packet sniffing done, compared setup measurements with Nordic's
+[ble-coex sample](https://nrfconnectdocs.nordicsemi.com/ncs/latest/nrf/samples/wifi/ble_coex/README.html)
+(see `docs/notes.md`).
 
 ## Hardware
 | Device | Role |
