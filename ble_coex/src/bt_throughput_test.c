@@ -558,9 +558,16 @@ int bt_throughput_test_run(void)
 	uint64_t stamp;
 	int64_t delta;
 	uint32_t data = 0;
+	struct bt_conn_info info = {0};
 
 	/* a dummy data buffer */
 	static char dummy[CONFIG_BT_L2CAP_TX_MTU - 3];
+
+	err = bt_conn_get_info(default_conn, &info);
+	if (err) {
+		LOG_ERR("Failed to get connection info %d", err);
+		return err;
+	}
 
 	if (!default_conn) {
 		LOG_ERR("Device is disconnected. Connect to the peer device before running test");
@@ -597,12 +604,25 @@ int bt_throughput_test_run(void)
 	stamp = k_uptime_get_32();
 
 	delta = 0;
+
+	/* timer for info.le.interval_us ms delays (link layer connection events and misses due to wifi coex) */
+	uint32_t conn_timer = k_uptime_get_32();
+
 	while (true) {
-		err = bt_throughput_write(&throughput, dummy, sizeof(dummy));
+		err = bt_throughput_write(&throughput, dummy, sizeof(dummy)); /* stalls on connection event misses */
 		if (err) {
 			LOG_ERR("GATT write failed (err %d)", err);
 			break;
 		}
+
+		uint32_t conn_delta = k_uptime_get_32() - conn_timer; /* in ms */
+
+		/* if the delay is greater than 0.5 times the connection delay; connection hits have small delays, otherwise discretized by info.le.interval_us */
+		if (conn_delta * 1000 > info.le.interval_us * 0.5)
+			LOG_INF("[nick's logging] connection miss, delay of %u ms", conn_delta);
+			
+		conn_timer = k_uptime_get_32(); /* LOG_INF() prolly takes a while */
+
 		data += sizeof(dummy);
 		if (k_uptime_get_32() - stamp > CONFIG_BLE_TEST_DURATION) {
 			break;

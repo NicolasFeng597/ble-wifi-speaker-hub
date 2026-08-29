@@ -33,3 +33,9 @@ collected data, Wi-Fi 802.11n in 2.4 GHz, separate antennas
 | Wi-Fi and Bluetooth LE, coexistence enabled | 6.51 | 553 |
 
 - collected data was a little noisy, probably due to a very busy 2.4 GHz band (+50 devices)
+
+**8/15, 8/22**
+- thinking of ideas, maybe coex algo with a speciifc usecase
+
+**8/28 to 8/31**
+- measuring latency for connectional intervals without coex
