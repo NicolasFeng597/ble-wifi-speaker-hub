@@ -607,6 +607,9 @@ int bt_throughput_test_run(void)
 
 	/* timer for info.le.interval_us ms delays (link layer connection events and misses due to wifi coex) */
 	uint32_t conn_timer = k_uptime_get_32();
+	uint16_t delays[1000]; /* delays[0] = # delays with < 10 ms connection time, delays[i] = delay of ith connection */
+	delays[0] = 0;
+	uint16_t delay_index = 1;
 
 	while (true) {
 		err = bt_throughput_write(&throughput, dummy, sizeof(dummy)); /* stalls on connection event misses */
@@ -615,11 +618,14 @@ int bt_throughput_test_run(void)
 			break;
 		}
 
-		uint32_t conn_delta = k_uptime_get_32() - conn_timer; /* in ms */
+		uint16_t conn_delta = k_uptime_get_32() - conn_timer; /* in ms */
 
 		/* if the delay is greater than 0.5 times the connection delay; connection hits have small delays, otherwise discretized by info.le.interval_us */
-		if (conn_delta * 1000 > info.le.interval_us * 0.5)
-			LOG_INF("[nick's logging] connection miss, delay of %u ms", conn_delta);
+		/*if (conn_delta * 1000 > info.le.interval_us * 0.5)
+			LOG_INF("[nick's logging] connection miss, delay of %u ms", conn_delta); */
+		if (conn_delta < 10) delays[0]++;
+		else if (delay_index < 1000)
+			delays[delay_index++] = conn_delta;
 			
 		conn_timer = k_uptime_get_32(); /* LOG_INF() prolly takes a while */
 
@@ -628,15 +634,20 @@ int bt_throughput_test_run(void)
 			break;
 		}
 	}
-
 	delta = k_uptime_delta(&stamp);
+
+	LOG_INF("[nick's logging] num delays < 10 ms is %u", delays[0]);
+	LOG_RAW("[nick's logging] other delays are: ");
+	for (int i = 1; i < delay_index; i++) LOG_RAW("%u ", delays[i]);
+	LOG_RAW("\n");
+	LOG_INF("[nick's logging] delay_index reached %u", delay_index);
 
 	LOG_INF("Done");
 	LOG_INF("[local] sent %u bytes (%u KB) in %lld ms at %llu kbps",
 			data, data / 1024, delta, ((uint64_t)data * 8 / delta));
 
 	/* read back char from peer */
-	err = bt_throughput_read(&throughput);
+	err = bt_throughput_read(&throughput);                 
 	if (err) {
 		LOG_ERR("GATT read failed (err %d)", err);
 		return err;

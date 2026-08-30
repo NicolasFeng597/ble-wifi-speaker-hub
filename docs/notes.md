@@ -27,15 +27,13 @@ reference data, Wi-Fi 802.11n in 2.4 GHz, separate antennas
 collected data, Wi-Fi 802.11n in 2.4 GHz, separate antennas
 | Test Case | Wi-Fi UDP TX throughput in Mbps | Bluetooth LE throughput in kbps |
 |---|---|---|
-| Wi-Fi only, client (UDP TX) | 8.64 | N.A.|
-| Bluetooth LE-only, central | N.A. | 1359 |
-| Wi-Fi and Bluetooth LE, coexistence disabled | 7.62 | 325 |
-| Wi-Fi and Bluetooth LE, coexistence enabled | 6.51 | 553 |
-
-- collected data was a little noisy, probably due to a very busy 2.4 GHz band (+50 devices)
+| Wi-Fi only, client (UDP TX) | 8.30 | N.A.|
+| Bluetooth LE-only, central | N.A. | 1377 |
+| Wi-Fi and Bluetooth LE, coexistence disabled | 7.46 | 498 |
+| Wi-Fi and Bluetooth LE, coexistence enabled | 6.47 | 634 |
 
 **8/15, 8/22**
-- thinking of ideas, maybe coex algo with a speciifc usecase
+- thinking of ideas, maybe coex algo with a specific usecase
 
-**8/28 to 8/31**
+**8/28 to 9/1**
 - measuring latency for connectional intervals without coex
