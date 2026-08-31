@@ -37,3 +37,11 @@ collected data, Wi-Fi 802.11n in 2.4 GHz, separate antennas
 
 **8/28 to 9/1**
 - measuring latency for connectional intervals without coex
+- added logging for bt_throughput_write(), but that only has delay for a TX write-no-read buffer,
+which is indirectly what I want to see
+- edited the mpsl_cx_nrf700x coex driver code, printing the delay between a PTA request() and its
+corresponding grant high signal (~5 ms delay between direct request()/grant() calls and
+bt_throughput_write() latency)
+- k_uptime_get_32() uses a spinlock that doesn't meet request() timing constraints since it's called
+"shortly before radio operations", must use k_cycle_get_32()
+- the coex code is on a different core so logging is through VCOM0 instead of VCOM1
