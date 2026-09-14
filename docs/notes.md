@@ -32,9 +32,6 @@ collected data, Wi-Fi 802.11n in 2.4 GHz, separate antennas
 | Wi-Fi and Bluetooth LE, coexistence disabled | 7.46 | 498 |
 | Wi-Fi and Bluetooth LE, coexistence enabled | 6.47 | 634 |
 
-**8/15, 8/22**
-- thinking of ideas, maybe coex algo with a specific usecase
-
 **8/28 to 9/1**
 - measuring latency for connectional intervals without coex
 - added logging for bt_throughput_write(), but that only has delay for a TX write-no-read buffer,
