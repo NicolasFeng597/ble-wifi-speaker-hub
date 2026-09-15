@@ -4,8 +4,7 @@ link to the remote.
 Using a Nordic hardware stack and Zephyr firmware stack.
 
 ## Status
-Obtained setup measurements mirroring Nordic's
-[ble-coex sample](https://nrfconnectdocs.nordicsemi.com/ncs/latest/nrf/samples/wifi/ble_coex/README.html):
+Obtained existing nRF 700x arbitration policy differences on local setup:
 
 (Wi-Fi 802.11n in 2.4GHz, separate antennas)
 | Test Case | Wi-Fi UDP TX throughput in Mbps | Bluetooth LE throughput in kbps |
@@ -14,6 +13,8 @@ Obtained setup measurements mirroring Nordic's
 | Bluetooth LE-only, central | N.A. | 1377 |
 | Wi-Fi and Bluetooth LE, coexistence disabled | 7.46 | 498 |
 | Wi-Fi and Bluetooth LE, coexistence enabled | 6.47 | 634 |
+
+Generally, arbitration radio grants are < 10 ms, however outliers take up 30% of all runtime (due to missed link layer connection interval events). Currently working on a policy to help with this right skew.
 
 See `docs/notes.md` for additional info.
 
