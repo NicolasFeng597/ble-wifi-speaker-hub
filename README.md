@@ -14,7 +14,7 @@ Obtained existing nRF 700x arbitration policy differences on local setup:
 | Wi-Fi and Bluetooth LE, coexistence disabled | 7.46 | 498 |
 | Wi-Fi and Bluetooth LE, coexistence enabled | 6.47 | 634 |
 
-Generally, arbitration radio grants are < 10 ms, however outliers take up 30% of all runtime (due to missed link layer connection interval events). Currently working on a policy to help with this right skew.
+Generally, arbitration radio grants are < 10 ms, however outliers take up 36% of all runtime (due to missed link layer connection interval events). Currently working on a policy to help with this right skew.
 
 See `docs/notes.md` for additional info.
 
