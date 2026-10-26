@@ -635,7 +635,7 @@ int bt_throughput_test_run(void)
 		}
 	}
 	delta = k_uptime_delta(&stamp);
-
+	LOG_INF("[nick's logging] logging delays from app core:");
 	LOG_INF("[nick's logging] num delays < 10 ms is %u", delays[0]);
 	LOG_RAW("[nick's logging] other delays are: ");
 	for (int i = 1; i < delay_index; i++) LOG_RAW("%u ", delays[i]);

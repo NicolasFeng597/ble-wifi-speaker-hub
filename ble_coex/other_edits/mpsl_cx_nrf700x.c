@@ -67,7 +67,8 @@ LOG_MODULE_REGISTER(mpsl_cx_nrf700x, CONFIG_MPSL_CX_LOG_LEVEL);
 #define GRANT_PIN_PIN_NO    DT_GPIO_PIN(CX_NODE, grant_gpios)
 
 #define DELAY_LOG_SIZE        500
-#define DELAY_PRINT_TIMER_SEC 45
+#define DELAY_PRINT_TIMER_SEC 130
+#define PRIORITY_LOG_SIZE     64
 
 #if defined(CONFIG_SOC_NRF54H20_CPURAD)
 #if (REQ_PIN_PORT_NO == 6) || (REQ_PIN_PORT_NO == 7) || (STATUS0_PIN_PORT_NO == 6) ||              \
@@ -110,6 +111,11 @@ static atomic_t already_requesting;
 static atomic_t num_small_delays;
 static atomic_t delay_i;
 static uint32_t delays[DELAY_LOG_SIZE]; /* in ms */
+static atomic_t prio_i;
+static uint32_t high_priority_times[PRIORITY_LOG_SIZE]; /* in cycles */
+/* reference cycles for priority times */
+static atomic_t seen_first_request;
+static uint32_t first_request_cycles;
 
 /* NOTE that this func can have multiple threads in it at the same time, spec only guarantees
 non-self-preemting calls for external funcs but this func can be called by granted_ops_get() and
@@ -163,6 +169,17 @@ void mpsl_cx_nrf700x_print_delay_log(void)
 	LOG_RAW("[nick's logging] specific delays above 10 ms: ");
 	for (int i = 0; i < (delay_index > DELAY_LOG_SIZE ? DELAY_LOG_SIZE : delay_index); i++) {
 		LOG_RAW("%u ", delays[i]);
+	}
+	LOG_RAW("\n");
+	atomic_val_t prio_index = atomic_get(&prio_i);
+
+	LOG_INF("[nick's logging] number of requests with high priority: %ld (%u log size)",
+			prio_index, PRIORITY_LOG_SIZE);
+	LOG_INF("[nick's logging] total test time in ms: %u",
+			(uint32_t) k_cyc_to_ms_floor32(k_cycle_get_32() - first_request_cycles));
+	LOG_RAW("[nick's logging] ms between first request to high priority requests: ");
+	for (int i = 0; i < (prio_index > PRIORITY_LOG_SIZE ? PRIORITY_LOG_SIZE : prio_index); i++) {
+		LOG_RAW("%u ", (uint32_t) k_cyc_to_ms_floor32(high_priority_times[i] - first_request_cycles));
 	}
 	LOG_RAW("\n");
 }
@@ -316,6 +333,12 @@ static int32_t request(const mpsl_cx_request_t *req_params)
 		start_time = k_cycle_get_32();
 	}
 
+	/* reference cycle count for first request() call, to find relative timing of high priority
+	request()s */
+	if (atomic_cas(&seen_first_request, 0, 1)) {
+		first_request_cycles = k_cycle_get_32();
+	}
+
 	if (req_params == NULL) {
 		return -NRF_EINVAL;
 	}
@@ -330,6 +353,15 @@ static int32_t request(const mpsl_cx_request_t *req_params)
 
 	if (ret < 0) {
 		return -NRF_EPERM;
+	}
+
+	/* relative time of each high priority request */
+	if (req_params->prio > UINT8_MAX / 2) {
+		atomic_val_t current_index = atomic_inc(&prio_i);
+
+		if (current_index < PRIORITY_LOG_SIZE) {
+			high_priority_times[current_index] = k_cycle_get_32();
+		}
 	}
 
 	return 0;

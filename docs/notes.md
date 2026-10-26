@@ -43,3 +43,7 @@ bt_throughput_write() latency)
 "shortly before radio operations", must use k_cycle_get_32()
 - the coex code is on a different core so logging is through VCOM0 instead of VCOM1
 - Ran logging, 99.4% of 13496 requests are < 10 ms, otherwise 12.5s of 35s period was taken up by requests > 10 ms
+
+**10/17 to 10/25**
+- found that majority of requests have low priority, ~0.04% have high priority
+- 
