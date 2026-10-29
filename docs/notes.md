@@ -3,7 +3,7 @@
 - looked through blinky code and devicetrees
 
 **8/2**
-- got nrf5340 and nrf7002 working for uart peripheral/central setup
+- got nrf5340 and nrf7002 working for uart peripheral/central setup (removed by 10/26, see initial commit)
 - sniffed gap packets with nrf52840 on wireshark
 - pushed repo
 - bug with nrf7002 ns peripheral build, use non-ns build
@@ -41,9 +41,10 @@ corresponding grant high signal (~5 ms delay between direct request()/grant() ca
 bt_throughput_write() latency)
 - k_uptime_get_32() uses a spinlock that doesn't meet request() timing constraints since it's called
 "shortly before radio operations", must use k_cycle_get_32()
-- the coex code is on a different core so logging is through VCOM0 instead of VCOM1
+- the coex code is on the net core so logging is through VCOM0 instead of VCOM1
 - Ran logging, 99.4% of 13496 requests are < 10 ms, otherwise 12.5s of 35s period was taken up by requests > 10 ms
 
-**10/17 to 10/25**
-- found that majority of requests have low priority, ~0.04% have high priority
-- 
+**10/17 to 10/28**
+- found that majority of request() calls (multiple per connection event) have low priority, ~0.04% have high priority (see data for specific time stamps)
+- explored setting the request wire between first request and last grant instead of turning it on and off between denied grants, however this would fail if it was granted after the connection interval, granting Tx to an asleep BLE controller for a worse-case 99 ms with 100 ms connection interval (assuming minimal connection interval request retries)
+- for UDP, sending an earlier request signal before connection events could increase odds of getting radio access, also avoiding the above case by the default of setting request low during regular request calls. MPSL's mpsl_radio_notification_cfg_set() has a callback that runs 200-5500 us before these events, so we can set the request wire there.

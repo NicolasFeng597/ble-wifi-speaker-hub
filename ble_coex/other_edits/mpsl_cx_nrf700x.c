@@ -13,6 +13,7 @@
 #if !defined(CONFIG_MPSL_CX_PIN_FORWARDER)
 #include <mpsl_cx_abstract_interface.h>
 #include <mpsl/mpsl_cx_nrf700x.h>
+#include <mpsl_radio_notification.h>
 #else
 #include <string.h>
 #include <soc_secure.h>
@@ -68,6 +69,8 @@ LOG_MODULE_REGISTER(mpsl_cx_nrf700x, CONFIG_MPSL_CX_LOG_LEVEL);
 
 #define DELAY_LOG_SIZE        500
 #define DELAY_PRINT_TIMER_SEC 130
+#define RADIO_NOTIF_LEAD_US   1000
+#define REQUEST_DELAYED_MS    20 /* point to start requesting earlier */
 #define PRIORITY_LOG_SIZE     64
 
 #if defined(CONFIG_SOC_NRF54H20_CPURAD)
@@ -114,8 +117,14 @@ static uint32_t delays[DELAY_LOG_SIZE]; /* in ms */
 static atomic_t prio_i;
 static uint32_t high_priority_times[PRIORITY_LOG_SIZE]; /* in cycles */
 /* reference cycles for priority times */
+static int32_t radio_notif_ret;
 static atomic_t seen_first_request;
 static uint32_t first_request_cycles;
+
+/* flags for delayed requests to request earlier, also logging number of these */
+static volatile bool request_delayed;
+static volatile bool req_raised_early;
+static uint32_t early_requests;
 
 /* NOTE that this func can have multiple threads in it at the same time, spec only guarantees
 non-self-preemting calls for external funcs but this func can be called by granted_ops_get() and
@@ -144,6 +153,7 @@ static int32_t grant_pin_is_asserted(bool *is_asserted)
 	if (*is_asserted) {
 		uint32_t local_start_time = start_time; /* stored since test and set may re-write start_time */
 		if (atomic_cas(&already_requesting, 1, 0)) {
+			request_delayed = false;
 			uint32_t delta = (uint32_t) k_cyc_to_ms_floor32(k_cycle_get_32() - local_start_time);
 			if (delta < 10) {
 				atomic_inc(&num_small_delays);
@@ -175,13 +185,16 @@ void mpsl_cx_nrf700x_print_delay_log(void)
 
 	LOG_INF("[nick's logging] number of requests with high priority: %ld (%u log size)",
 			prio_index, PRIORITY_LOG_SIZE);
-	LOG_INF("[nick's logging] total test time in ms: %u",
+	LOG_INF("[nick's logging] total test time in ms for priority reference: %u",
 			(uint32_t) k_cyc_to_ms_floor32(k_cycle_get_32() - first_request_cycles));
 	LOG_RAW("[nick's logging] ms between first request to high priority requests: ");
 	for (int i = 0; i < (prio_index > PRIORITY_LOG_SIZE ? PRIORITY_LOG_SIZE : prio_index); i++) {
 		LOG_RAW("%u ", (uint32_t) k_cyc_to_ms_floor32(high_priority_times[i] - first_request_cycles));
 	}
 	LOG_RAW("\n");
+	LOG_INF("[nick's logging] radio notification cfg_set success code (0 is good): %d",
+		radio_notif_ret);
+	LOG_INF("[nick's logging] number of early requests: %u", early_requests);
 }
 
 /* started in mpsl_cx_init, runs after DELAY_PRINT_TIMER_SEC */
@@ -331,6 +344,8 @@ static int32_t request(const mpsl_cx_request_t *req_params)
 	storing first request() to find time between first call and grant HIGH */
 	if (atomic_cas(&already_requesting, 0, 1)) {
 		start_time = k_cycle_get_32();
+	} else if ((uint32_t) k_cyc_to_ms_floor32(k_cycle_get_32() - start_time) > REQUEST_DELAYED_MS) {
+		request_delayed = true;
 	}
 
 	/* reference cycle count for first request() call, to find relative timing of high priority
@@ -355,6 +370,9 @@ static int32_t request(const mpsl_cx_request_t *req_params)
 		return -NRF_EPERM;
 	}
 
+	/* not in early request state anymore */
+	req_raised_early = false;
+
 	/* relative time of each high priority request */
 	if (req_params->prio > UINT8_MAX / 2) {
 		atomic_val_t current_index = atomic_inc(&prio_i);
@@ -370,6 +388,9 @@ static int32_t request(const mpsl_cx_request_t *req_params)
 static int32_t release(void)
 {
 	int ret;
+
+	/* so nACTIVE case in radio notif callback doesn't release it again */
+	req_raised_early = false;
 
 	ret = gpio_drive_request(0);
 	if (ret < 0) {
@@ -471,6 +492,39 @@ static int mpsl_cx_init(void)
 }
 
 SYS_INIT(mpsl_cx_init, POST_KERNEL, CONFIG_MPSL_CX_INIT_PRIORITY);
+
+/* called RADIO_NOTIF_LEAD_US before radio and sometime after radio */
+static void radio_notif_cb(mpsl_radio_notification_source_t source)
+{
+	if (source == MPSL_RADIO_NOTIFICATION_SOURCE_ACTIVE) {
+		if (request_delayed) {
+			/* central always sends TX to peripheral first */
+			gpio_drive_status0_to_dir(MPSL_CX_OP_TX);
+			gpio_drive_request(MPSL_CX_OP_RX | MPSL_CX_OP_TX);
+			req_raised_early = true;
+			early_requests++;
+		}
+	} else if (req_raised_early) {
+		/* if request() was never called after req_raised_early was set */
+		req_raised_early = false;
+		gpio_drive_request(0);
+		gpio_drive_status0_to_dir(0);
+	}
+}
+
+/* "MPSL must be initialized and no protocol stack running", so after mpsl_cx_init() and MPSL's
+init at priority 40 */
+static int radio_notif_setup(void)
+{
+	/* commented out for stock run, no radio notification means radio_notif_cb() never runs
+	radio_notif_ret = mpsl_radio_notification_cfg_set(MPSL_RADIO_NOTIFICATION_TYPE_INT_ON_BOTH,
+							  RADIO_NOTIF_LEAD_US, radio_notif_cb);
+	*/
+	ARG_UNUSED(radio_notif_cb);
+	radio_notif_ret = -1; /* not configured */
+	return 0;
+}
+SYS_INIT(radio_notif_setup, POST_KERNEL, 41);
 
 void mpsl_cx_nrf700x_set_enabled(bool enable)
 {

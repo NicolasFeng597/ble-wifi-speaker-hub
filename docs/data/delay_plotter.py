@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Plots of the delay between the coex request and grant pin
+"""Plots of the delay between the coex request and grant pins.
 
-Usage:
+Single run (histogram, request/wait portions, time contribution, raw values):
     python delay_plotter.py <num_delays_below_10ms> <total_test_ms> <delay> [<delay> ...]
-                            [--save <dir>]
     ex: python delay_plotter.py 9651 100001 401 141 205 86 158
 
-Opens one window per plot, all at once. With --save <dir> the plots are written
-to <dir> as PNGs instead.
+Compare policies (survival curve + markdown table of tail metrics, runs pooled):
+    python delay_plotter.py --compare data.md --pool 0 4 --name "Baseline coex policy (700x)" \
+        --pool 1 2 --name "Early request (REQ preemption)" [--max-ms 900] [--tail-ms 350 450 550]
 
-Plots: delay histogram (buckets <10, 10-49, 50-99, 100-149, etc.), request vs
-waiting-time portions, each bucket's contribution to test delay, and the raw delay values.
+Plots open in windows; nothing is saved to disk.
 """
 
 import argparse
-import os
+import re
+import sys
 from collections import Counter
 
 import matplotlib.pyplot as plt
@@ -80,11 +80,7 @@ def plot_histogram(num_small, delays):
 
 
 def time_split(num_small, total_ms, delays):
-    """Long-delay time is exact. Everything else is total minus that.
-
-    The time spent in the <10 ms requests is not logged, only bounded: each one
-    is under SMALL_LIMIT ms, so their total is at most num_small * SMALL_LIMIT.
-    """
+    """(time in logged waits, upper bound on time in the unlogged < SMALL_LIMIT waits)."""
     long_ms = sum(delays)
     rest_ms = total_ms - long_ms
     small_max_ms = min(num_small * SMALL_LIMIT, rest_ms)
@@ -167,7 +163,127 @@ def plot_raw(delays):
     return fig
 
 
+# ---- compare mode: pool runs from data.md and compare their tails ----
+COMPARE_STEP_MS = 10
+PERCENTILES = (90, 95, 99)
+
+
+def parse_runs(path):
+    """[(label, delays)] per "specific delays above" line; label = nearest text line above."""
+    runs, label = [], "run"
+    with open(path) as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            if "specific delays above" in line:
+                runs.append((label, [int(t) for t in line.split(":", 1)[1].split()]))
+            elif not line.startswith("[") and not re.match(r"\d+:\d", line):
+                label = line  # not a log line
+    return runs
+
+
+def is_baseline(label):
+    label = label.lower()
+    return label.startswith("base") or "baseline" in label or "no early" in label
+
+
+def pooled(group):
+    return [d for delays in group for d in delays]
+
+
+def plot_survival(groups, max_ms=None):
+    """Count of waits >= x vs x (complementary CDF), log y. Baseline blue, others orange."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    set_window_title(fig, "Wait Complementary CDF")
+    top = max_ms or max(max(pooled(g)) for _, g in groups)
+    xs = list(range(SMALL_LIMIT, top + COMPARE_STEP_MS, COMPARE_STEP_MS))
+    colors = iter(["C1", "C2", "C3", "C4"])
+    for label, group in groups:
+        delays = pooled(group)
+        ys = [sum(1 for d in delays if d >= x) for x in xs]
+        last = max((j for j, y in enumerate(ys) if y > 0), default=-1)  # log axis: drop zeros
+        if last < 0:
+            continue
+        color = "C0" if is_baseline(label) else next(colors)
+        ax.step(xs[:last + 1], ys[:last + 1], where="post", color=color, linewidth=1.8,
+                label=label)
+    ax.set_yscale("log")
+    ax.set_xlabel("Wait length (ms)")
+    ax.set_ylabel("Remaining number of delays, runs pooled (log scale)")
+    ax.set_title("Total delay survival curve")
+    ax.xaxis.set_major_locator(MultipleLocator(100))
+    ax.grid(True, which="both", alpha=0.3)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def tail_metrics(delays, tail_ms):
+    """[(row name, value)]: counts and seconds in waits >= each threshold, percentiles."""
+    ordered = sorted(delays)
+    rows = [(f"Waits \u2265 {t} ms", sum(1 for d in delays if d >= t)) for t in tail_ms]
+    rows += [(f"Time stalled in waits \u2265 {t} ms (s)", sum(d for d in delays if d >= t) / 1000)
+             for t in tail_ms]
+    rows += [(f"{p}th percentile wait (ms)",
+              ordered[min(len(ordered) - 1, int(p / 100 * len(ordered)))]) for p in PERCENTILES]
+    return rows
+
+
+def print_tail_table(groups, tail_ms):
+    """Markdown table of pooled tail metrics with % change vs the baseline group."""
+    metrics = [tail_metrics(pooled(g), tail_ms) for _, g in groups]
+    base = next((i for i, (label, _) in enumerate(groups) if is_baseline(label)), 0)
+    others = [i for i in range(len(groups)) if i != base]
+    order = [base] + others
+    change = ["Change"] if len(others) == 1 else [f"Change ({groups[i][0]})" for i in others]
+    header = ["Metric"] + [groups[i][0] for i in order] + change
+    print("\n| " + " | ".join(header) + " |")
+    print("|" + "---|" * len(header))
+    for r, (name, base_val) in enumerate(metrics[base]):
+        row = [name] + [f"{metrics[i][r][1]:.3g}" for i in order]
+        row += [f"{100 * (metrics[i][r][1] - base_val) / base_val:+.0f}%" if base_val else "n/a"
+                for i in others]
+        print("| " + " | ".join(row) + " |")
+    print("\n(runs pooled per column: " +
+          ", ".join(f"{label} = {len(g)}" for label, g in groups) + ")")
+
+
+def compare_main(argv):
+    parser = argparse.ArgumentParser(description="Compare pooled runs from data.md")
+    parser.add_argument("--compare", metavar="FILE", required=True, help="data.md log")
+    parser.add_argument("--pool", type=int, nargs="+", action="append", required=True,
+                        metavar="I", help="run indices (file order, from 0) pooled into one "
+                                          "data set; repeat per policy")
+    parser.add_argument("--name", action="append", default=[],
+                        help="legend/column name for each --pool, in order")
+    parser.add_argument("--max-ms", type=int, help="x-axis limit in ms")
+    parser.add_argument("--tail-ms", type=int, nargs="+", default=[350, 450, 550],
+                        help="tail thresholds in ms (default 350 450 550)")
+    args = parser.parse_args(argv)
+
+    runs = parse_runs(args.compare)
+    if not runs:
+        parser.error(f"no 'specific delays above' lines in {args.compare}")
+    for i, (label, delays) in enumerate(runs):
+        print(f"[{i}] {len(delays):4d} waits >= {SMALL_LIMIT} ms  {label}")
+    bad = [i for g in args.pool for i in g if not 0 <= i < len(runs)]
+    if bad:
+        parser.error(f"run indices out of range: {bad}")
+    if len(args.name) > len(args.pool):
+        parser.error("more --name values than --pool groups")
+
+    groups = [(args.name[k] if k < len(args.name) else runs[g[0]][0], [runs[i][1] for i in g])
+              for k, g in enumerate(args.pool)]
+    plot_survival(groups, args.max_ms)
+    print_tail_table(groups, args.tail_ms)
+    plt.show()
+
+
 def main():
+    if "--compare" in sys.argv[1:]:
+        compare_main(sys.argv[1:])
+        return
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("num_small", type=int,
@@ -175,8 +291,6 @@ def main():
     parser.add_argument("total_ms", type=int, help="total time of the test in ms")
     parser.add_argument("delays", type=int, nargs="*",
                         help=f"space-separated delays of {SMALL_LIMIT} ms or more")
-    parser.add_argument("--save", metavar="DIR",
-                        help="write the plots to DIR as PNGs instead of opening windows")
     args = parser.parse_args()
 
     if args.num_small < 0 or any(d < SMALL_LIMIT for d in args.delays):
@@ -187,21 +301,11 @@ def main():
         parser.error(f"total_ms ({args.total_ms}) must exceed the sum of the listed delays "
                      f"({sum(args.delays)})")
 
-    figs = {
-        "histogram": plot_histogram(args.num_small, args.delays),
-        "portions": plot_portions(args.num_small, args.total_ms, args.delays),
-        "contribution": plot_contribution(args.total_ms, args.delays),
-        "raw_values": plot_raw(args.delays),
-    }
-
-    if args.save:
-        os.makedirs(args.save, exist_ok=True)
-        for name, fig in figs.items():
-            path = os.path.join(args.save, f"{name}.png")
-            fig.savefig(path, dpi=200)
-            print(f"Saved {path}")
-    else:
-        plt.show()
+    plot_histogram(args.num_small, args.delays)
+    plot_portions(args.num_small, args.total_ms, args.delays)
+    plot_contribution(args.total_ms, args.delays)
+    plot_raw(args.delays)
+    plt.show()
 
 
 if __name__ == "__main__":
